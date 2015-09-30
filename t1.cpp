@@ -10,10 +10,68 @@
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
+#include <vector>
 
 using namespace std;
 
 struct TRoboClaw {
+  enum {M1FORWARD = 0,
+        M1BACKWARD = 1,
+        SETMINMB = 2,
+        SETMAXMB = 3,
+        M2FORWARD = 4,
+        M2BACKWARD = 5,
+        M17BIT = 6,
+        M27BIT = 7,
+        MIXEDFORWARD = 8,
+        MIXEDBACKWARD = 9,
+        MIXEDRIGHT = 10,
+        MIXEDLEFT = 11,
+        MIXEDFB = 12,
+        MIXEDLR = 13,
+        GETM1ENC = 16,
+        GETM2ENC = 17,
+        GETM1SPEED = 18,
+        GETM2SPEED = 19,
+        RESETENC = 20,
+        GETVERSION = 21,
+        GETMBATT = 24,
+        GETLBATT = 25,
+        SETMINLB = 26,
+        SETMAXLB = 27,
+        SETM1PID = 28,
+        SETM2PID = 29,
+        GETM1ISPEED = 30,
+        GETM2ISPEED = 31,
+        M1DUTY = 32,
+        M2DUTY = 33,
+        MIXEDDUTY = 34,
+        M1SPEED = 35,
+        M2SPEED = 36,
+        MIXEDSPEED = 37,
+        M1SPEEDACCEL = 38,
+        M2SPEEDACCEL = 39,
+        MIXEDSPEEDACCEL = 40,
+        M1SPEEDDIST = 41,
+        M2SPEEDDIST = 42,
+        MIXEDSPEEDDIST = 43,
+        M1SPEEDACCELDIST = 44,
+        M2SPEEDACCELDIST = 45,
+        MIXEDSPEEDACCELDIST = 46,
+        GETBUFFERS = 47,
+        SETPWM = 48,
+        GETCURRENTS = 49,
+        MIXEDSPEED2ACCEL = 50,
+        MIXEDSPEED2ACCELDIST = 51,
+        M1DUTYACCEL = 52,
+        M2DUTYACCEL = 53,
+        MIXEDDUTYACCEL = 54,
+        GETM1PID = 55,
+        GETM2PID = 56,
+        GETERROR = 90,
+        WRITENVM = 94,
+    	GETM1MAXCURRENT = 135};
+
 	struct TRoboClawException : public std::exception {
 		std::string s;
 		TRoboClawException(std::string ss) : s(ss) {}
@@ -95,14 +153,15 @@ struct TRoboClaw {
 		FD_ZERO(&set); // Clear the set.
 		FD_SET(clawPort, &set); // Add file descriptor to the set.
 		timeout.tv_sec = 0;
-		timeout.tv_usec = 10000; // 10 milliseconds.
-		selectResult = select(FD_SETSIZE/*clawPort + 1*/, &set /* read */, NULL /* write */, NULL /* exception */, &timeout);
+		timeout.tv_usec = 100000; // 10 milliseconds.
+
+		selectResult = select(clawPort + 1, &set /* read */, NULL /* write */, NULL /* exception */, &timeout);
 		if (DEBUG) cout << "[readByteWithTimeout] SELECT clawPort: " << clawPort << ", FD_SETSIZE: " << FD_SETSIZE << " errno: " << errno << ", selectResult: " << selectResult << endl;//#####
 		if (selectResult == -1) {
-			if (DEBUG) cout << "[readWithTimeout] ERROR " << errno << endl;
+			if (DEBUG) cout << "[readByteWithTimeout] ERROR " << errno << endl;
 			return 0;
 		} else if (selectResult == 0) {
-			if (DEBUG) cout << "[readWithTimeout] TIMEOUT " << endl;
+			if (DEBUG) cout << "[readByteWithTimeout] TIMEOUT " << endl;
 			return 0;
 		} else {
 			char buffer[1];
@@ -120,18 +179,18 @@ struct TRoboClaw {
 		} else { if (DEBUG) cout << "[writeByte] WRITING: " << hex << int(byte) << dec << endl; }
 	}
 
-	bool writeN(bool sendChecksum, uint8_t cnt, ...) {
-		uint8_t crc = 0;
+	bool writeN(uint8_t cnt, ...) {
 		va_list marker;
 		va_start(marker, cnt);
+
+		tcflush(clawPort, TCIOFLUSH);
+
 		for (uint8_t i = 0; i < cnt; i++) {
 			uint8_t byte = va_arg(marker, int);
-			crc += byte;
 			writeByte(byte);
 		}
 
 		va_end(marker);
-		if (sendChecksum) writeByte(crc & 0x7F);
 		return false;
 	}
 
@@ -141,7 +200,7 @@ struct TRoboClaw {
 			try {
 				uint8_t checkSum = portAddress + command;
 
-				writeN(false, 2, portAddress, command);
+				writeN(2, portAddress, command);
 				unsigned short result = 0;
 				uint8_t datum = readByteWithTimeout();
 				checkSum += datum;
@@ -172,7 +231,7 @@ struct TRoboClaw {
 			try {
 				uint8_t checkSum = portAddress + command;
 
-				writeN(false, 2, portAddress, command);
+				writeN(2, portAddress, command);
 				unsigned long result = 0;
 				uint8_t datum = readByteWithTimeout();
 				checkSum += datum;
@@ -208,42 +267,36 @@ struct TRoboClaw {
 		unsigned long p2;
 	} ULongPair;
 
+	uint32_t getLongCont(uint8_t& checksum) {
+		uint32_t result = 0;
+		uint8_t datum = readByteWithTimeout();
+		checksum += datum;
+		result |= datum << 24;
+		datum = readByteWithTimeout();
+		checksum += datum;
+		result |= datum << 16;
+		datum = readByteWithTimeout();
+		checksum += datum;
+		result |= datum << 8;
+		datum = readByteWithTimeout();
+		checksum += datum;
+		result |= datum;
+		return result;
+	}
+
 	ULongPair getULongPairCommandResult(uint8_t command) {
 		int retry;
 		for (retry = 0; retry < MAX_COMMAND_RETRIES; retry++) {
 			try {
-				uint8_t checkSum = portAddress + command;
+				uint8_t checksum = portAddress + command;
 
-				writeN(false, 2, portAddress, command);
-				unsigned long result1 = 0;
-				uint8_t datum = readByteWithTimeout();
-				checkSum += datum;
-				result1 |= datum << 24;
-				datum = readByteWithTimeout();
-				checkSum += datum;
-				result1 |= datum << 16;
-				datum = readByteWithTimeout();
-				checkSum += datum;
-				result1 |= datum << 8;
-				datum = readByteWithTimeout();
-				checkSum += datum;
-				result1 |= datum;
+				writeN(2, portAddress, command);
+				uint32_t result1 = getLongCont(checksum);
+				uint32_t result2 = getLongCont(checksum);
 
-				unsigned long result2 = 0;
-				datum = readByteWithTimeout();
-				checkSum += datum;
-				result2 |= datum << 24;
-				datum = readByteWithTimeout();
-				checkSum += datum;
-				result2 |= datum << 16;
-				datum = readByteWithTimeout();
-				checkSum += datum;
-				result2 |= datum << 8;
-				datum = readByteWithTimeout();
-				checkSum += datum;
-				result2 |= datum;				uint8_t responseChecksum = readByteWithTimeout();
-				if ((checkSum & 0x7F) != (responseChecksum & 0x7F)) {
-					if (DEBUG) cout << "[getUlongPairCommandResult] Expected checkSum of: " << hex << int(checkSum) << ", but got:" << int(responseChecksum) << dec << endl;
+				uint8_t responseChecksum = readByteWithTimeout();
+				if ((checksum & 0x7F) != (responseChecksum & 0x7F)) {
+					if (DEBUG) cout << "[getUlongPairCommandResult] Expected checksum of: " << hex << int(checksum) << ", but got:" << int(responseChecksum) << dec << endl;
 					throw new TRoboClawException("[getULongPairCommandResult] INVALID CHECKSUM");
 				}
 
@@ -261,18 +314,18 @@ struct TRoboClaw {
 	}
 
 	float getLogicBatteryLevel() {
-		return ((float) get2ByteCommandResult(25)) / 10.0;
+		return ((float) get2ByteCommandResult(GETLBATT)) / 10.0;
 	}
 
 	float getM1MaxCurrent() {
-		ULongPair temp = getULongPairCommandResult(135);
+		ULongPair temp = getULongPairCommandResult(GETM1MAXCURRENT);
 		return ((float) temp.p1) / 100.0;
 	}
 
 	string getVersion() {
-		writeN(false, 2, portAddress, 21);
+		writeN(2, portAddress, GETVERSION);
 		string result;
-		unsigned char b;
+		uint8_t b;
 
 		do {
 			b = readByteWithTimeout();
@@ -284,18 +337,76 @@ struct TRoboClaw {
 		return result;
 	}
 
+	void long2bytes(uint32_t value, uint8_t index, vector<uint8_t> &data) {
+		data[index] = value >> 24 & 0xFF;
+		data[index + 1] = value >> 16 & 0xFF;
+		data[index + 2] = value >> 8 & 0xFF;
+		data[index + 3] = value & 0xFF;
+	}
+
+	#define SetDWORDval(arg) (uint8_t)(arg>>24),(uint8_t)(arg>>16),(uint8_t)(arg>>8),(uint8_t)arg
+
+	void setM1PID(float p, float i, float d, uint32_t qpps) {
+		uint32_t kp = int(p * 65536.0);
+		uint32_t ki = int(i * 65536.0);
+		uint32_t kd = int(d * 65536.0);
+		cout << "[setM1PID] p: " << hex << kp << ", i: " << ki << ", d: " << kd << ", qpps: " << qpps << dec << endl;
+		vector<uint8_t> data = vector<uint8_t>(16);
+		long2bytes(kd, 0, data);
+		long2bytes(kp, 4, data);
+		long2bytes(ki, 8, data);
+		long2bytes(qpps, 12, data);
+		writeN(18, portAddress, SETM1PID, 
+			   SetDWORDval(kd),//data[0], data[1], data[2], data[3],
+			   SetDWORDval(kp),//data[4], data[5], data[6], data[7],
+			   SetDWORDval(ki),//data[8], data[9], data[10], data[11],
+			   SetDWORDval(qpps));//data[12], data[13], data[14], data[15]);
+	}
+
+	typedef struct {
+		float p;
+		float i;
+		float d;
+		uint32_t qpps;
+	} TPID;
+
+	TPID getM1PID() {
+		writeN(2, portAddress, GETM1PID);
+		uint8_t checksum = portAddress + GETM1PID;
+		TPID result;
+
+		result.d = getLongCont(checksum);
+		result.p = getLongCont(checksum);
+		result.i = getLongCont(checksum);
+		result.qpps = getLongCont(checksum);
+
+		uint8_t responseChecksum = readByteWithTimeout();
+		if ((checksum & 0x7F) != (responseChecksum & 0x7F)) {
+			if (DEBUG) cout << "[getM1PID] Expected checksum of: " << hex << int(checksum) << ", but got:" << int(responseChecksum) << dec << endl;
+			throw new TRoboClawException("[getM1PID] INVALID CHECKSUM");
+		}
+
+		return result;
+	}
 
 };
 
 int main(int argc, char **argv) {
 	cout << "Hello world\n";
 	TRoboClaw roboClaw;
-	float floatVal;
 
-	string stringVal = roboClaw.getVersion();
-	cout << "VERSION: " << stringVal << endl;
-	floatVal = roboClaw.getLogicBatteryLevel();
-	cout << "LOGIC VOLTAGE: " << floatVal << endl;
-	floatVal = roboClaw.getM1MaxCurrent();
-	cout << "MAX M1 Motor Current: " << floatVal << endl;
+	try {
+		string stringVal = roboClaw.getVersion();
+		cout << "VERSION: " << stringVal << endl;
+		float floatVal = roboClaw.getLogicBatteryLevel();
+		cout << "LOGIC VOLTAGE: " << floatVal << endl;
+		floatVal = roboClaw.getM1MaxCurrent();
+		cout << "MAX M1 Motor Current: " << floatVal << endl;
+		roboClaw.setM1PID(226.3538, 13.35421, 0, 2810);
+		TRoboClaw::TPID pid = roboClaw.getM1PID();
+		cout << "PID p: " << pid.p << ", i: " << pid.i << ", d: " << pid.d << ", q: " << pid.qpps << endl;
+	} catch (TRoboClaw::TRoboClawException* e) {
+		cout << "[main] EXCEPTION: " << e->what() << endl;
+		return -1;
+	}
 }
