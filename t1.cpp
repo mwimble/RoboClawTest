@@ -337,30 +337,18 @@ struct TRoboClaw {
 		return result;
 	}
 
-	void long2bytes(uint32_t value, uint8_t index, vector<uint8_t> &data) {
-		data[index] = value >> 24 & 0xFF;
-		data[index + 1] = value >> 16 & 0xFF;
-		data[index + 2] = value >> 8 & 0xFF;
-		data[index + 3] = value & 0xFF;
-	}
-
 	#define SetDWORDval(arg) (uint8_t)(arg>>24),(uint8_t)(arg>>16),(uint8_t)(arg>>8),(uint8_t)arg
 
 	void setM1PID(float p, float i, float d, uint32_t qpps) {
-		uint32_t kp = int(p * 65536.0);
-		uint32_t ki = int(i * 65536.0);
-		uint32_t kd = int(d * 65536.0);
+		uint32_t kp = 13;//#####int(p * 65536.0);
+		uint32_t ki = 27;//#####int(i * 65536.0);
+		uint32_t kd = 59;//#####int(d * 65536.0);
 		cout << "[setM1PID] p: " << hex << kp << ", i: " << ki << ", d: " << kd << ", qpps: " << qpps << dec << endl;
-		vector<uint8_t> data = vector<uint8_t>(16);
-		long2bytes(kd, 0, data);
-		long2bytes(kp, 4, data);
-		long2bytes(ki, 8, data);
-		long2bytes(qpps, 12, data);
 		writeN(18, portAddress, SETM1PID, 
-			   SetDWORDval(kd),//data[0], data[1], data[2], data[3],
-			   SetDWORDval(kp),//data[4], data[5], data[6], data[7],
-			   SetDWORDval(ki),//data[8], data[9], data[10], data[11],
-			   SetDWORDval(qpps));//data[12], data[13], data[14], data[15]);
+			   SetDWORDval(kd),
+			   SetDWORDval(kp),
+			   SetDWORDval(ki),
+			   SetDWORDval(qpps));
 	}
 
 	typedef struct {
@@ -375,9 +363,9 @@ struct TRoboClaw {
 		uint8_t checksum = portAddress + GETM1PID;
 		TPID result;
 
-		result.d = getLongCont(checksum);
-		result.p = getLongCont(checksum);
-		result.i = getLongCont(checksum);
+		result.d = getLongCont(checksum) / 65536.0;
+		result.p = getLongCont(checksum) / 65536.0;
+		result.i = getLongCont(checksum) / 65536.0;
 		result.qpps = getLongCont(checksum);
 
 		uint8_t responseChecksum = readByteWithTimeout();
