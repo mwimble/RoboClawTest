@@ -82,7 +82,7 @@ struct TRoboClaw {
 	int clawPort;
 	static const char portAddress = 0x80;
 	static const int MAX_COMMAND_RETRIES = 5;
-	static const bool DEBUG = true;
+	static const bool DEBUG = false;
 
 	TRoboClaw() {
 		clawPort = open("/dev/ttyACM0", O_RDWR | O_NOCTTY);
@@ -390,6 +390,7 @@ int main(int argc, char **argv) {
 		cout << "MAX M1 Motor Current: " << floatVal << endl;
 		floatVal = roboClaw.getM1MaxCurrent();
 		cout << "MAX M1 Motor Current (2): " << floatVal << endl;
+
 		roboClaw.setM1PID(226.3538, 13.35421, 0, 2810);
 
 		TRoboClaw::TPID pid = roboClaw.getM1PID();
