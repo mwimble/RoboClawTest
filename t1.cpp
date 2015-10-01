@@ -85,7 +85,7 @@ struct TRoboClaw {
 	static const bool DEBUG = true;
 
 	TRoboClaw() {
-		clawPort = open("/dev/ttyACM0", O_RDWR | O_NOCTTY | O_NONBLOCK);
+		clawPort = open("/dev/ttyACM0", O_RDWR | O_NOCTTY);
 		if (clawPort == -1) {
 			cout << "[TRoboClaw constructor] unable to open USB port";
 			throw new TRoboClawException("Unable to open USB port");
@@ -102,18 +102,18 @@ struct TRoboClaw {
 			throw new TRoboClawException("[TRoboClaw] Device is already locked");
 		}
 
-        // Set up the port so reading nothing returns immediately, instead of blocking
+        // Set up the port so reading nothing returns immediately, instead of blocking.
 		//fcntl(clawPort, F_SETFL, FNDELAY);
 
-        // Fetch the current port settings
+        // Fetch the current port settings.
 		struct termios portOptions;
 		tcgetattr(clawPort, &portOptions);
 		memset(&portOptions.c_cc, 0, sizeof(portOptions.c_cc));
 
-        // Flush the port's buffers (in and out) before we start using it
+        // Flush the port's buffers (in and out) before we start using it.
         tcflush(clawPort, TCIOFLUSH);
 
-        // Set the input and output baud rates
+        // Set the input and output baud rates.
         cfsetispeed(&portOptions, B115200);
         cfsetospeed(&portOptions, B115200);
 
@@ -125,18 +125,8 @@ struct TRoboClaw {
         portOptions.c_iflag = IGNPAR;
         portOptions.c_oflag = 0;
         portOptions.c_lflag = 0;
-        // portOptions.c_cflag |= CLOCAL;
-        // portOptions.c_cflag |= CREAD;
-        // // Set up the frame information.
-        // portOptions.c_cflag &= ~PARENB;
-        // portOptions.c_cflag &= ~CSTOPB;
-        // portOptions.c_cflag &= ~CSIZE;
-        // portOptions.c_cflag |= CS8;
-        // portOptions.c_iflag &= ~(ICANON | ECHO |ECHOE | ECHOK | ECHONL | ISIG | IEXTEN | INLCR | IGNCR | ICRNL | IGNBRK | IUCLC | PARMRK | INPCK | ISTRIP | PARENB | PARODD);
-        // portOptions.c_oflag &= ~(OPOST | ONLCR | OCRNL);
 
-        // Now that we've populated our options structure, let's push it back to the
-        //   system.
+        // Now that we've populated our options structure, let's push it back to the system.
         tcsetattr(clawPort, TCSANOW, &portOptions);
 
         // Flush the buffer one more time.
@@ -175,22 +165,26 @@ struct TRoboClaw {
 	void writeByte(uint8_t byte) {
 		ssize_t result = write(clawPort, &byte, 1);
 		if (result != 1) {
-			throw new TRoboClawException("Unable to write one byte");
+			cout << "[writeByte] Unable to write one byte, result: " << result << ", errno: " << errno << endl;
+			throw new TRoboClawException("[writeByte] Unable to write one byte");
 		} else { if (DEBUG) cout << "[writeByte] WRITING: " << hex << int(byte) << dec << endl; }
 	}
 
-	bool writeN(uint8_t cnt, ...) {
+	bool writeN(bool sendChecksum, uint8_t cnt, ...) {
 		va_list marker;
 		va_start(marker, cnt);
 
-		tcflush(clawPort, TCIOFLUSH);
+		//tcflush(clawPort, TCIOFLUSH);
 
+		uint8_t checksum = 0;
 		for (uint8_t i = 0; i < cnt; i++) {
 			uint8_t byte = va_arg(marker, int);
 			writeByte(byte);
+			checksum += byte;
 		}
 
 		va_end(marker);
+		if (sendChecksum) { writeByte(checksum & 0x7F); }
 		return false;
 	}
 
@@ -200,7 +194,7 @@ struct TRoboClaw {
 			try {
 				uint8_t checkSum = portAddress + command;
 
-				writeN(2, portAddress, command);
+				writeN(true, 2, portAddress, command);
 				unsigned short result = 0;
 				uint8_t datum = readByteWithTimeout();
 				checkSum += datum;
@@ -231,7 +225,7 @@ struct TRoboClaw {
 			try {
 				uint8_t checkSum = portAddress + command;
 
-				writeN(2, portAddress, command);
+				writeN(true, 2, portAddress, command);
 				unsigned long result = 0;
 				uint8_t datum = readByteWithTimeout();
 				checkSum += datum;
@@ -290,7 +284,7 @@ struct TRoboClaw {
 			try {
 				uint8_t checksum = portAddress + command;
 
-				writeN(2, portAddress, command);
+				writeN(true, 2, portAddress, command);
 				uint32_t result1 = getLongCont(checksum);
 				uint32_t result2 = getLongCont(checksum);
 
@@ -323,7 +317,7 @@ struct TRoboClaw {
 	}
 
 	string getVersion() {
-		writeN(2, portAddress, GETVERSION);
+		writeN(false, 2, portAddress, GETVERSION);
 		string result;
 		uint8_t b;
 
@@ -340,11 +334,12 @@ struct TRoboClaw {
 	#define SetDWORDval(arg) (uint8_t)(arg>>24),(uint8_t)(arg>>16),(uint8_t)(arg>>8),(uint8_t)arg
 
 	void setM1PID(float p, float i, float d, uint32_t qpps) {
-		uint32_t kp = 13;//#####int(p * 65536.0);
-		uint32_t ki = 27;//#####int(i * 65536.0);
-		uint32_t kd = 59;//#####int(d * 65536.0);
+		cout << "---- setM1PID" << endl;
+		uint32_t kp = int(p * 65536.0); // 14834322.6368 = E25A93
+		uint32_t ki = int(i * 65536.0);
+		uint32_t kd = int(d * 65536.0);
 		cout << "[setM1PID] p: " << hex << kp << ", i: " << ki << ", d: " << kd << ", qpps: " << qpps << dec << endl;
-		writeN(18, portAddress, SETM1PID, 
+		writeN(true, 18, portAddress, SETM1PID, 
 			   SetDWORDval(kd),
 			   SetDWORDval(kp),
 			   SetDWORDval(ki),
@@ -359,13 +354,14 @@ struct TRoboClaw {
 	} TPID;
 
 	TPID getM1PID() {
-		writeN(2, portAddress, GETM1PID);
+		cout << "---- getM1PID" << endl;
+		writeN(true, 2, portAddress, GETM1PID);
 		uint8_t checksum = portAddress + GETM1PID;
 		TPID result;
 
-		result.d = getLongCont(checksum) / 65536.0;
 		result.p = getLongCont(checksum) / 65536.0;
 		result.i = getLongCont(checksum) / 65536.0;
+		result.d = getLongCont(checksum) / 65536.0; 
 		result.qpps = getLongCont(checksum);
 
 		uint8_t responseChecksum = readByteWithTimeout();
@@ -386,13 +382,20 @@ int main(int argc, char **argv) {
 	try {
 		string stringVal = roboClaw.getVersion();
 		cout << "VERSION: " << stringVal << endl;
+
 		float floatVal = roboClaw.getLogicBatteryLevel();
 		cout << "LOGIC VOLTAGE: " << floatVal << endl;
+
 		floatVal = roboClaw.getM1MaxCurrent();
 		cout << "MAX M1 Motor Current: " << floatVal << endl;
+		floatVal = roboClaw.getM1MaxCurrent();
+		cout << "MAX M1 Motor Current (2): " << floatVal << endl;
 		roboClaw.setM1PID(226.3538, 13.35421, 0, 2810);
+
 		TRoboClaw::TPID pid = roboClaw.getM1PID();
 		cout << "PID p: " << pid.p << ", i: " << pid.i << ", d: " << pid.d << ", q: " << pid.qpps << endl;
+		pid = roboClaw.getM1PID();
+		cout << "PID (2) p: " << pid.p << ", i: " << pid.i << ", d: " << pid.d << ", q: " << pid.qpps << endl;
 	} catch (TRoboClaw::TRoboClawException* e) {
 		cout << "[main] EXCEPTION: " << e->what() << endl;
 		return -1;
