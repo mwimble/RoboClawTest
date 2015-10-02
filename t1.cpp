@@ -14,7 +14,9 @@
 
 using namespace std;
 
-struct TRoboClaw {
+class TRoboClaw {
+private:
+
   enum {M1FORWARD = 0,
         M1BACKWARD = 1,
         SETMINMB = 2,
@@ -72,68 +74,10 @@ struct TRoboClaw {
         WRITENVM = 94,
     	GETM1MAXCURRENT = 135};
 
-	struct TRoboClawException : public std::exception {
-		std::string s;
-		TRoboClawException(std::string ss) : s(ss) {}
-		~TRoboClawException() throw() {}
-		const char* what() const throw() { return s.c_str(); }
-	};
-
 	int clawPort;
 	static const char portAddress = 0x80;
 	static const int MAX_COMMAND_RETRIES = 5;
 	static const bool DEBUG = false;
-
-	TRoboClaw() {
-		clawPort = open("/dev/ttyACM0", O_RDWR | O_NOCTTY);
-		if (clawPort == -1) {
-			cout << "[TRoboClaw constructor] unable to open USB port";
-			throw new TRoboClawException("Unable to open USB port");
-		}
-
-		struct flock lock;
-		lock.l_type = F_WRLCK;
-		lock.l_whence = SEEK_SET;
-		lock.l_start = 0;
-		lock.l_len = 0;
-		lock.l_pid = getpid();
-		if (fcntl(clawPort, F_SETLK, &lock) != 0) {
-			cout << "[TRoboClaw] Device is already locked" << endl;
-			throw new TRoboClawException("[TRoboClaw] Device is already locked");
-		}
-
-        // Set up the port so reading nothing returns immediately, instead of blocking.
-		//fcntl(clawPort, F_SETFL, FNDELAY);
-
-        // Fetch the current port settings.
-		struct termios portOptions;
-		tcgetattr(clawPort, &portOptions);
-		memset(&portOptions.c_cc, 0, sizeof(portOptions.c_cc));
-
-        // Flush the port's buffers (in and out) before we start using it.
-        tcflush(clawPort, TCIOFLUSH);
-
-        // Set the input and output baud rates.
-        cfsetispeed(&portOptions, B115200);
-        cfsetospeed(&portOptions, B115200);
-
-        // c_cflag contains a few important things- CLOCAL and CREAD, to prevent
-        //   this program from "owning" the port and to enable receipt of data.
-        //   Also, it holds the settings for number of data bits, parity, stop bits,
-        //   and hardware flow control. 
-        portOptions.c_cflag = CS8 | CLOCAL | CREAD;
-        portOptions.c_iflag = IGNPAR;
-        portOptions.c_oflag = 0;
-        portOptions.c_lflag = 0;
-
-        // Now that we've populated our options structure, let's push it back to the system.
-        tcsetattr(clawPort, TCSANOW, &portOptions);
-
-        // Flush the buffer one more time.
-        tcflush(clawPort, TCIOFLUSH);
-        usleep(200000);
-		if (DEBUG) cout << "[TRoboClaw constructor] USB open\n";
-	}
 
 	uint8_t readByteWithTimeout() {
 		fd_set	set;
@@ -305,6 +249,65 @@ struct TRoboClaw {
 
 		cout << "[getULongPairCommandResult] RETRY COUNT EXCEEDED" << endl;
 		throw new TRoboClawException("[getULongPairCommandResult] RETRY COUNT EXCEEDED");
+	}
+
+public:
+	struct TRoboClawException : public std::exception {
+		std::string s;
+		TRoboClawException(std::string ss) : s(ss) {}
+		~TRoboClawException() throw() {}
+		const char* what() const throw() { return s.c_str(); }
+	};
+
+	TRoboClaw() {
+		clawPort = open("/dev/ttyACM0", O_RDWR | O_NOCTTY);
+		if (clawPort == -1) {
+			cout << "[TRoboClaw constructor] unable to open USB port";
+			throw new TRoboClawException("Unable to open USB port");
+		}
+
+		struct flock lock;
+		lock.l_type = F_WRLCK;
+		lock.l_whence = SEEK_SET;
+		lock.l_start = 0;
+		lock.l_len = 0;
+		lock.l_pid = getpid();
+		if (fcntl(clawPort, F_SETLK, &lock) != 0) {
+			cout << "[TRoboClaw] Device is already locked" << endl;
+			throw new TRoboClawException("[TRoboClaw] Device is already locked");
+		}
+
+        // Set up the port so reading nothing returns immediately, instead of blocking.
+		//fcntl(clawPort, F_SETFL, FNDELAY);
+
+        // Fetch the current port settings.
+		struct termios portOptions;
+		tcgetattr(clawPort, &portOptions);
+		memset(&portOptions.c_cc, 0, sizeof(portOptions.c_cc));
+
+        // Flush the port's buffers (in and out) before we start using it.
+        tcflush(clawPort, TCIOFLUSH);
+
+        // Set the input and output baud rates.
+        cfsetispeed(&portOptions, B115200);
+        cfsetospeed(&portOptions, B115200);
+
+        // c_cflag contains a few important things- CLOCAL and CREAD, to prevent
+        //   this program from "owning" the port and to enable receipt of data.
+        //   Also, it holds the settings for number of data bits, parity, stop bits,
+        //   and hardware flow control. 
+        portOptions.c_cflag = CS8 | CLOCAL | CREAD;
+        portOptions.c_iflag = IGNPAR;
+        portOptions.c_oflag = 0;
+        portOptions.c_lflag = 0;
+
+        // Now that we've populated our options structure, let's push it back to the system.
+        tcsetattr(clawPort, TCSANOW, &portOptions);
+
+        // Flush the buffer one more time.
+        tcflush(clawPort, TCIOFLUSH);
+        usleep(200000);
+		if (DEBUG) cout << "[TRoboClaw constructor] USB open\n";
 	}
 
 	float getLogicBatteryLevel() {
